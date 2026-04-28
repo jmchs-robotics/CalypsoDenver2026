@@ -28,3 +28,9 @@ pluginManagement {
 
 Properties props = System.getProperties();
 props.setProperty("org.gradle.internal.native.headers.unresolved.dependencies.ignore", "true");
+
+includeBuild('BulldogLib') {
+    dependencySubstitution {
+        substitute module('net.calicotl:bulldoglib') using project(':bulldoglib')
+    }
+}
