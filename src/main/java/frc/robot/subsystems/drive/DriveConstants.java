@@ -106,6 +106,20 @@ public static final double driveKp = 0.0;
             moduleTranslations);
 
 public static final DriveTrainSimulationConfig mapleSimConfig =
-
+    DriveTrainSimulationConfig.Default()
+     .withCustomModuleTranslations(moduleTranslations)
+     .withRobotMass(Kilogram.of(robotMassKg))
+          .withGyro(COTS.ofPigeon2())
+          .withSwerveModule(
+              new SwerveModuleSimulationConfig(
+                  driveGearbox,
+                  turnGearbox,
+                  driveMotorReduction,
+                  turnMotorReduction,
+                  Volts.of(0.1),
+                  Volts.of(0.1),
+                  Meters.of(wheelRadiusMeters),
+                  KilogramSquareMeters.of(0.02),
+                  wheelCOF));
 
 }
