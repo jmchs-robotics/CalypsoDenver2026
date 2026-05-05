@@ -108,6 +108,167 @@ public void periodic() {
         modules[0].getOdometryTimestamps();
     int sampleCount = sampleTimestamps.length;
     for (int i = o; i < sampleCount; i++) {
-        
+
+        SwerveModulePosition[] modulePostitions = new SwerveModulePosition[4];
+        SwerveModulePosition[] moduleDeltas = new SwerveModulePosition[4];
+        for (int moduleIndex = 0; moduleIndex < 4; moduleIndex++) {
+            modulePositions[moduleIndex] = modules[moduleIndex].getOdometryPositions()[i];
+        moduleDeltas[moduleIndex] =
+            new SwerveModulePosition(
+                modulePositions[moduleIndex].distanceMeters
+                    - lastModulePositions[moduleIndex].distanceMeters,
+                modulePositions[moduleIndex].angle);
+        lastModulePositions[moduleIndex] = modulePositions[moduleIndex];
     }
+
+    if (gyroInputs.connected) {
+
+        rawGyroRotation = gyroInputs.odometryYawPositions[i];
+    } else {
+
+        Twist2d twist = kinematics.toTwist2d(moduleDeltas);
+        rawGyroRotation = rawGyroRotation.plus(new Rotation2d(twist.dtheta));
+    }
+
+    poseEstimator.updateWithTime(sampleTimestamps[i], rawGyroRotation, modulePositions);
+    }
+
+    gyroDisconnectedAlert.set(!gyroInputs.connected && Constants.currentMode != Mode.SIM);
 }
+
+
+public void runVelocity(ChassisSpeeds speeds) {
+
+        // Calculate module setpoints
+    ChassisSpeeds discreteSpeeds = ChassisSpeeds.discretize(speeds, 0.02);
+    SwerveModuleState[] setpointStates = kinematics.toSwerveModuleStates(discreteSpeeds);
+    SwerveDriveKinematics.desaturateWheelSpeeds(setpointStates, maxSpeedMetersPerSec);
+
+    // Log unoptimized setpoints
+    Logger.recordOutput("SwerveStates/Setpoints", setpointStates);
+    Logger.recordOutput("SwerveChassisSpeeds/Setpoints", discreteSpeeds);
+
+    for (int i = 0; i<4; i++) {
+        modules[i].runSetpoint(setpointStates[i]);
+    }
+
+    Logger.recordOutput("SwerveStates/SetpointsOptimized", setpointStates);
+}
+
+/** Runs the drive in a straight line with the specified drive output. */
+  public void runCharacterization(double output) {
+    for (int i = 0; i < 4; i++) {
+      modules[i].runCharacterization(output);
+    }
+  }
+
+  /** Stops the drive. */
+  public void stop() {
+    runVelocity(new ChassisSpeeds());
+  }
+
+  /**
+   * Stops the drive and turns the modules to an X arrangement to resist movement. The modules will
+   * return to their normal orientations the next time a nonzero velocity is requested.
+   */
+  public void stopWithX() {
+    Rotation2d[] headings = new Rotation2d[4];
+    for (int i = 0; i < 4; i++) {
+      headings[i] = moduleTranslations[i].getAngle();
+    }
+    kinematics.resetHeadings(headings);
+    stop();
+  }
+
+  public Command sysIdQuasistatic(SysIdRoutine.Direction direction) {
+    return run(() -> runCharacterization(0.0))
+        .withTimeout(1.0)
+        .andThen(sysId.quasistatic(direction));
+  }
+
+  public Command sysIdDynamic(SysIdRoutine.Direction direction) {
+    return run(() -> runCharacterization(0.0)).withTimeout(1.0).andThen(sysId.dynamic(direction));
+  }
+
+@AutoLogOutput(key = "SwerveStates/Measured")
+private SwerveModuleState[] getModuleStates() {
+    SwerveModuleState[] states = new SwerveModuleState[4];
+    for (int i = 0; i < 4; i++) {
+        states[i] = modules[i].getState();
+    }
+    return states;
+}
+
+
+  /** Returns the module positions (turn angles and drive positions) for all of the modules. */
+  private SwerveModulePosition[] getModulePositions() {
+    SwerveModulePosition[] states = new SwerveModulePosition[4];
+    for (int i = 0; i < 4; i++) {
+      states[i] = modules[i].getPosition();
+    }
+    return states;
+  }
+
+  /** Returns the measured chassis speeds of the robot. */
+  @AutoLogOutput(key = "SwerveChassisSpeeds/Measured")
+  public ChassisSpeeds getChassisSpeeds() {
+    return kinematics.toChassisSpeeds(getModuleStates());
+  }
+
+public double[] getWheelRadiusCharacterizationPositions() {
+    double[] values = new double[4];
+    for (int i = 0; i < 4; i++) {
+        values[i] = modules[i].getWheelRadiusCharacterizationPosition();
+    }
+    return values;
+}
+
+public double getFFCharacterizationVelocity() {
+    double output = 0.0;
+    for (int i = 0; i < 4; i++) {
+      output += modules[i].getFFCharacterizationVelocity() / 4.0;
+    }
+    return output;
+  }
+
+  /** Returns the current odometry pose. */
+  @AutoLogOutput(key = "Odometry/Robot")
+  public Pose2d getPose() {
+    return poseEstimator.getEstimatedPosition();
+  }
+
+  /** Returns the current odometry rotation. */
+  public Rotation2d getRotation() {
+    return getPose().getRotation();
+  }
+
+  /** Resets the current odometry pose. */
+  public void setPose(Pose2d pose) {
+    resetSimulationPoseCallBack.accept(pose);
+    poseEstimator.resetPose(pose);
+  }
+
+  public void addVisionMeasurement(
+    Pose2d visionRobotPoseMeters,
+    double timestampSeconds,
+    Matrix<N3, N1> visionMeasurementStdDevs) {
+   poseEstimator.addVisionMeasurement(
+    visionRobotPoseMeters, timestampSeconds, visionMeasurementStdDevs);
+}
+
+ /** Returns the maximum linear speed in meters per sec. */
+  public double getMaxLinearSpeedMetersPerSec() {
+    return maxSpeedMetersPerSec;
+  }
+
+  /** Returns the maximum angular speed in radians per sec. */
+  public double getMaxAngularSpeedRadPerSec() {
+    return maxSpeedMetersPerSec / driveBaseRadius;
+  }
+
+  public void zeroHeading() {
+    gyroIO.resetGyro();
+  }
+}
+
+
